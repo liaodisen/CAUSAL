@@ -1,0 +1,143 @@
+---
+title: "pdf_Shucked_weight"
+output:
+  html_document:
+    df_print: paged
+---
+
+## Probability Density Estimation
+
+### Packages
+
+```{r}
+require(copula)
+require(kdensity)
+require(VC2copula)
+require(VineCopula)
+library(cubature)
+```
+
+### Data Preparation
+```{r}
+abalone <- read.csv("abalone.csv")
+head(abalone)
+```
+
+### Treatment and Outcome
+Here we use variable "Length" as the treatment, and "Shucked.weight" as the outcome, and we are aiming to model the probability density function, and we need to use `pobs` functions to get the uniform distribution of the dataset
+```{r}
+tr <- abalone$Length
+ou <- abalone$Shucked.weight
+mdata <- cbind(tr, ou)
+umdata <- pobs(mdata)
+treat <- umdata[,1]
+out <- umdata[,2]
+```
+
+### Kernel Probability Density Estimation
+
+Here is the estimation of the shucked weight, and comparison with the histogram
+
+```{r}
+f <- kdensity(mdata[,2], start = "gaussian", kernel = "gaussian", adjust = 1/3)
+hist(mdata[,2], main = "Shucked.weight", xlab = "Shucked.weight", breaks = 100)
+par(new=TRUE)
+plot(f, xaxt = "n", yaxt = "n", xlab = "", ylab = "", main = "")
+```
+
+Here is the estimation of Length
+```{r}
+g <- kdensity(mdata[,1], start = "gaussian", kernel = "gaussian")
+hist(mdata[,1], main = "Length", xlab = "Length")
+par(new=TRUE)
+plot(g, xaxt = "n", yaxt = "n", xlab = "", ylab = "", main = "")
+```
+
+
+Here is the estimation of stream_first_target_frame_completion_time
+```{r}
+g <- kdensity(mdata[,1], start = "gamma", kernel = "gamma")
+hist(mdata[,1], main = "stream_first_target_frame_completion_time", xlab = "stream_first_target_frame_completion_time")
+par(new=TRUE)
+plot(g, xaxt = "n", yaxt = "n", xlab = "", ylab = "", main = "")
+```
+
+### Copula function estimation
+
+we define marginal functions, just return the function
+
+```{r}
+margin_treatment <- function(x){
+  return(g(x))
+}
+margin_out <- function(x){
+  return(f(x))
+}
+```
+
+```{r}
+cdt <- function(x){
+  res <- integrate(margin_treatment, -Inf, x)$value
+  if (res > 1){return(1)}
+  else{return(res)}
+}
+cdo <- function(x){
+  res <- integrate(margin_out, -Inf, x)$value
+  if (res > 1){return(1)}
+  else{return(res)}
+}
+cdt2vec <- function(t){return(sapply(t, cdt))}
+cdo2vec <- function(t){sapply(t, cdo)}
+```
+We define the conditional probability function, it is a joint distribution
+
+```{r}
+mycop <- BiCopEst(out, treat, family = 2)
+FOT <- function(o, t){
+  a <- cdo2vec(o)
+  b <- cdt2vec(t)
+  BiCopPDF(a, b, mycop)*margin_out(o)
+}
+
+```
+
+when Length is 0.45 and 0.65 respectively
+
+```{r}
+FOTm <- function(x){
+  FOT(x,0.45)
+}
+FOTmm <- function(x){
+  FOT(x,0.65)
+}
+FOT1vec <- function(t){sapply(t, FOTm)}
+FOT2vec <- function(t){sapply(t, FOTmm)}
+```
+
+```{r}
+X <- seq(0.01, 1.5, by = 0.05)
+E1 <- function(x){
+  return(x*FOTm(x))
+}
+E2 <- function(x){
+  return(x*FOTmm(x)) 
+}
+E1vec <- function(t){return(sapply(t,E1))}
+E2vec <- function(t){return(sapply(t,E2))}
+```
+
+```{r}
+plot(X, FOT1vec(X), ylab = "PDF", xlab = "Shucked.weight", type = "l")
+```
+
+```{r}
+plot(X, FOT2vec(X), ylab = "PDF", xlab = "Shucked.weight", type = "lr")
+```
+
+Then, we can integrate the PDF to get the expectation value under each value of treatment
+
+```{r}
+Ex1 <- integrate(E1vec, -Inf, Inf)
+Ex2 <- integrate(E2vec, -Inf, Inf)
+Ex2$value - Ex1$value
+```
